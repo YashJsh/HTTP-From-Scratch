@@ -1,46 +1,67 @@
 import net from "node:net";
-import fs from "node:fs";
 
+//NOTE : Took the help of AI Here to refactor the code better;
 const server = net.createServer((socket) => {
-  socket.on("data", (data) => {
-    const rawRequest = data.toString();
+  let buffer = Buffer.alloc(0);
+  let headersParsed = false;
+  let headers = {};
+  let contentLength = 0;
+  let bodyBuffer = Buffer.alloc(0);
 
-    // Parse request line
-    const requestLine = rawRequest.split("\r\n")[0];
-    const [method, requestPath] = requestLine.split(" ");
+  socket.on("data", (chunk) => {
+    // Accumulate raw bytes
+    buffer = Buffer.concat([buffer, chunk]);
 
-    console.log("Method:", method);
-    console.log("Path:", requestPath);
+    // Parse headers once
+    if (!headersParsed) {
+      const boundary = Buffer.from("\r\n\r\n");
+      const boundaryIndex = buffer.indexOf(boundary);
 
-    // Route: serve files
-    if (requestPath.startsWith("/file/")) {
-      const fileName = requestPath.replace("/file/", "");
+      if (boundaryIndex === -1) {
+        return; // headers not complete yet
+      }
 
-      fs.readFile(`./files/${fileName}`, "utf8", (err, fileData) => {
-        if (err) {
-          const responseBody = "Not Found";
-          const response =
-            `HTTP/1.1 404 Not Found\r\n` +
-            `Content-Length: ${responseBody.length}\r\n\r\n` +
-            responseBody;
+      // Split headers and body start
+      const headerPart = buffer.slice(0, boundaryIndex).toString();
+      const bodyStart = buffer.slice(boundaryIndex + boundary.length);
 
-          socket.write(response);
-          return;
-        }
+      const lines = headerPart.split("\r\n");
+      const [method, requestPath] = lines[0].split(" ");
 
-        const response =
-          `HTTP/1.1 200 OK\r\n` +
-          `Content-Length: ${fileData.length}\r\n\r\n` +
-          fileData;
+      headers = Object.fromEntries(
+        lines.slice(1).map((line) => {
+          const index = line.indexOf(":");
+          return [
+            line.slice(0, index).toLowerCase(),
+            line.slice(index + 1).trim(),
+          ];
+        })
+      );
 
-        socket.write(response);
-      });
+      contentLength = Number(headers["content-length"] || 0);
+      headersParsed = true;
 
-      return;
+      bodyBuffer = Buffer.concat([bodyBuffer, bodyStart]);
+      buffer = Buffer.alloc(0);
+
+      console.log("Method:", method);
+      console.log("Path:", requestPath);
+      console.log("Headers:", headers);
+    } else {
+      // Continue reading body
+      bodyBuffer = Buffer.concat([bodyBuffer, buffer]);
+      buffer = Buffer.alloc(0);
     }
 
-    // Route: /health
-    if (requestPath === "/health") {
+    // Body fully received
+    if (headersParsed && bodyBuffer.length >= contentLength) {
+      const requestBody = bodyBuffer
+        .slice(0, contentLength)
+        .toString();
+
+      console.log("Body:", requestBody);
+
+      // Simple response (same for all routes)
       const responseBody = "OK";
       const response =
         `HTTP/1.1 200 OK\r\n` +
@@ -48,17 +69,11 @@ const server = net.createServer((socket) => {
         responseBody;
 
       socket.write(response);
-      return;
+
+      // Reset state (no keep-alive handling yet)
+      headersParsed = false;
+      bodyBuffer = Buffer.alloc(0);
     }
-
-    // Default response
-    const responseBody = "Not Found";
-    const response =
-      `HTTP/1.1 200 OK\r\n` +
-      `Content-Length: ${responseBody.length}\r\n\r\n` +
-      responseBody;
-
-    socket.write(response);
   });
 
   socket.on("end", () => {
