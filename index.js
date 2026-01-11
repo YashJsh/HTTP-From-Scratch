@@ -1,3 +1,4 @@
+//Note : Node’s TCP server already handles multiple connections concurrently by default.
 import net from "node:net";
 
 const server = net.createServer((socket) => {
