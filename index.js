@@ -9,39 +9,29 @@ const FILE_ROOT = path.resolve("./files");
 const server = net.createServer((socket) => {
     // Creating a buffer
     let buffer = Buffer.alloc(0);
-    // Making head parsed to be false
-    let headersParsed = false;
-    let contentLength = 0;
-    let contentEncoding = null;
-    let headers = {};
-    let bodyBuffer = Buffer.alloc(0);
 
     socket.on('data', (chunk) => {
         //Total data is in buffer now
         buffer = Buffer.concat([buffer, chunk]);
 
-        //2. Parsing headers only
-        if (!headersParsed) {
+        while (true) {
             const boundary = Buffer.from("\r\n\r\n"); // it's like how to write \r\n\r\n in buffer 
             const idx = buffer.indexOf(boundary); //finding this boundary in buffer
 
             //Headers are not completed yet
             if (idx === -1) {
-                return;
+                break;
             }
 
-            //Split headers and body
+            //Split headers 
             const headerPart = buffer.slice(0, idx).toString();
-
-            const bodyPart = buffer.slice(idx + boundary.length);
-
 
             //Parse the header;
             const lines = headerPart.split("\r\n");
             const [method, path] = lines[0].split(" ");
 
             //Headers 
-            headers = Object.fromEntries(
+            const headers = Object.fromEntries(
                 lines.slice(1).map((line) => {
                     const i = line.indexOf(":");
                     return [
@@ -51,38 +41,28 @@ const server = net.createServer((socket) => {
                 })
             );
 
-            contentLength = Number(headers["content-length"] || 0);
-            contentEncoding = headers["accept-encoding"];
-            headersParsed = true;
+            const contentLength = Number(headers["content-length"] || 0);
 
-            //Put body in bodybuffer
-            bodyBuffer = Buffer.concat([bodyBuffer, bodyPart]);
+            //Check if full body is available : 
+            const totalRequestLength = idx + 4 + contentLength;
+            if (buffer.length < totalRequestLength) break;
 
-            buffer = Buffer.alloc(0);
+            const body = buffer.slice(idx + 4, totalRequestLength).toString();
+
             console.log("METHOD:", method);
             console.log("PATH:", path);
             console.log("HEADERS:", headers);
-        } else {
-            // 3. Accumulate body bytes
-            bodyBuffer = Buffer.concat([bodyBuffer, buffer]);
-            buffer = Buffer.alloc(0);
-        }
-        if (headersParsed && bodyBuffer.length >= contentLength) {
-            const body = bodyBuffer.slice(0, contentLength).toString();
             console.log("BODY:", body);
 
-            const acceptsGzip =
-                headers["accept-encoding"] &&
-                headers["accept-encoding"].includes("gzip");
-
             const responseBody = Buffer.from("OK");
+            const acceptsGzip = headers["accept-encoding"]?.includes("gzip");
+
             if (acceptsGzip) {
-               
                 const gzipped = zlib.gzipSync(responseBody);
                 socket.write(
                     `HTTP/1.1 200 OK\r\n` +
                     `Content-Length: ${gzipped.length}\r\n` +
-                    `Content-Encoding: ${contentEncoding}\r\n\r\n`
+                    `Content-Encoding: gzip\r\n\r\n`
                 );
                 socket.write(gzipped);
             } else {
@@ -92,10 +72,7 @@ const server = net.createServer((socket) => {
                 );
                 socket.write(responseBody);
             }
-
-            // reset for next request (keep-alive later)
-            headersParsed = false;
-            bodyBuffer = Buffer.alloc(0);
+            buffer = buffer.slice(totalRequestLength);
         }
     });
     socket.on('end', () => {
@@ -107,7 +84,7 @@ server.on('error', (err) => {
     throw err;
 });
 
-server.listen(3000, () => {
+server.listen(8080, () => {
     console.log('server bound');
 });
 
