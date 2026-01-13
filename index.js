@@ -4,8 +4,7 @@ import fs from "fs";
 import path from "node:path";
 import zlib from "zlib";
 
-//Stage - 11 : Concurrent persistent connections.
-//For this our code, doesn't need any change as our code already heandles concurrent persistent connetions.
+//Stage - 12 : Connection closure
 
 const FILE_ROOT = path.resolve("./files");
 
@@ -58,6 +57,8 @@ const server = net.createServer((socket) => {
             console.log("BODY:", body);
 
             const responseBody = Buffer.from("OK");
+            const shouldClose =
+            headers["connection"]?.toLowerCase() === "close";
             const acceptsGzip = headers["accept-encoding"]?.includes("gzip");
 
             if (acceptsGzip) {
@@ -76,6 +77,11 @@ const server = net.createServer((socket) => {
                 socket.write(responseBody);
             }
             buffer = buffer.slice(totalRequestLength);
+            // Respect Connection: close
+            if (shouldClose) {
+                socket.end();
+                return;
+            }
         }
     });
     socket.on('end', () => {
